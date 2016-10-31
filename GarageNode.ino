@@ -112,7 +112,7 @@ void setup()
 
 	Serial.begin(9600);
 
-	// flash until the USB serial cable is connected
+	// TODO: need this? Flash until the USB serial cable is connected
 	while (!Serial)
 	{
 		flashLed(isDiscovered);
@@ -148,6 +148,9 @@ void loop()
 			// read garage car door positions
 			lowerSwitchReading = digitalRead(lowerSwitchPin);
 			sendData(lGarageId, lowerSwitchReading);
+
+			upperSwitchReading = digitalRead(upperSwitchPin);
+			sendData(uGarageId, upperSwitchReading);
 
 			/*
 			// IR reading
