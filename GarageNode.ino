@@ -15,17 +15,27 @@ Light Sensor
 A2 to Sensor to Gnd
 A2 to 10K to 5V
 
+Temp Sensor
 DHT22 (also RHT03)
 Data(pin2) D4 via 10K pullup resistor from data pin to power of the sensor
+5V and Gnd
+
+A0 = Sonar Sensor, breadout board connects directly
 
 TODO: re-evaluate these LED needs
 D6 Disovered LED
 D7 Send LED
+Dn -> 10K -> Led -> Gnd
 
-switches have hardware debounce
+D3 = garage door
+D3 -> 10K -> Gnd, switch between D3 and Gnd
+Gnd -> .01uF -> D3
+
+Switches with hardware debounce
 D5 = car garage door lower pin
 D6 = car garage door upper pin
-
+Dn -> 10K -> Gnd, switch leads between Dn and Gnd
+Gnd -> .01uF -> Dn
 */
 
 #include "DHT.h"
@@ -34,19 +44,17 @@ D6 = car garage door upper pin
 const uint8_t discoveredLED = 13;
 const uint8_t activityLED = 4;
 
-/*
-// IR
-const uint8_t irPin = A0;
-int irReading = 0;
-int irLastReading = 0;
-char *irIdentifier = "d";		// Car Garage (D)oor
-*/
-
 // light sensor
 const uint8_t lightPin = A1;
 int lightReading = 0;
 int lightLastReading = 0;
 char *lightIdentifier = "l";	// (L)ights, not garage door opener light
+
+// sonar sensor
+const uint8_t sonarPin = A0;
+int sonarReading = 0;
+int lastSonarReading = 0;
+char *sonarId = "sa";		// accomodating multiple sonar sensors
 
 // temp sensor
 #define DHTPIN 2
@@ -57,6 +65,11 @@ char *tmpIdH = "th";	// humidity
 char *tmpIdHiC = "ta";	// heat index in C
 char *tmpIdHiF = "tb";	// heat index in F
 
+// garage door switch from house
+const uint8_t garageDoorPin = 3;
+uint8_t garageDoorReading = 0;
+char *doorId = "de";
+
 // car (G)arage door reed switchs
 // two sensors GarageLower and GarageUpper
 const uint8_t lowerSwitchPin = 5;
@@ -66,10 +79,6 @@ char *uGarageId = "gu";
 
 uint8_t lowerSwitchReading = 0;
 uint8_t upperSwitchReading = 0;
-/*
-uint8_t lastLowerSwitchState = 0;
-uint8_t lastUpperSwitchState = 0;
-*/
 
 struct TempReadings
 {
@@ -84,7 +93,7 @@ TempReadings *tempData = new TempReadings();
 
 // timer
 long lastMills = 0;
-int timerThreshold = 5000;
+int timerThreshold = 2000;
 
 // serial data
 #define SERIAL_BUFFER 3
@@ -104,8 +113,15 @@ void setup()
 	pinMode(discoveredLED, OUTPUT);
 	pinMode(activityLED, OUTPUT);
 
+	// house garage door
+	pinMode(garageDoorPin, INPUT);
+
+	// car garage door
 	pinMode(lowerSwitchPin, INPUT);
 	pinMode(upperSwitchPin, INPUT);
+
+	//pinMode(sonarPin, INPUT);
+	//pinMode(lightPin, INPUT);
 
 	digitalWrite(discoveredLED, LOW);
 	digitalWrite(activityLED, LOW);
@@ -125,6 +141,7 @@ void setup()
 void loop()
 {
 	// host not discovered node (via port) yet
+	// TODO: is this really necessary with a UI controller?
 	if (!isDiscovered)
 	{
 		nodeDiscovery();
@@ -146,22 +163,24 @@ void loop()
 		if (millis() - lastMills > timerThreshold)
 		{
 			// read garage car door positions
-			lowerSwitchReading = digitalRead(lowerSwitchPin);
-			sendData(lGarageId, lowerSwitchReading);
-
 			upperSwitchReading = digitalRead(upperSwitchPin);
 			sendData(uGarageId, upperSwitchReading);
 
-			/*
-			// IR reading
-			irReading = analogRead(irPin);
-			sendData(irIdentifier, irReading);
-			*/
+			lowerSwitchReading = digitalRead(lowerSwitchPin);
+			sendData(lGarageId, lowerSwitchReading);
 
-			// allow ADC level to settle
-			delay(50);
+			// read house garage door
+			garageDoorReading = digitalRead(garageDoorPin);
+			sendData(doorId, garageDoorReading);
+
+			// read light data	TODO: read 10 times and take average to reduce noise?
 			lightReading = analogRead(lightPin);
 			sendData(lightIdentifier, lightReading);
+
+			// read sonar data
+			delay(50);	// allow ADC level to settle	TODO: read 10 times and take average to remove noise
+			sonarReading = analogRead(sonarPin);
+			sendData(sonarId, sonarReading);
 
 			// temp 
 			takeTempReading();
