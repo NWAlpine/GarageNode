@@ -20,6 +20,12 @@ DHT22 (also RHT03)
 Data(pin2) D4 via 10K pullup resistor from data pin to power of the sensor
 5V and Gnd
 
+I2C Temp Sensor - Sparkfun Breakout board is 3.3V
+A5	SCL
+A4	SDA
+3.3V Power
+Ground
+
 A0 = Sonar Sensor, breadout board connects directly
 
 TODO: re-evaluate these LED needs
@@ -39,6 +45,7 @@ Gnd -> .01uF -> Dn
 */
 
 #include "DHT.h"
+#include "wire.h"
 
 // LED			TODO: add LED and correct pin
 const uint8_t discoveredLED = 13;
@@ -48,7 +55,7 @@ const uint8_t activityLED = 4;
 const uint8_t lightPin = A1;
 int lightReading = 0;
 int lightLastReading = 0;
-char *lightIdentifier = "l";	// (L)ights, not garage door opener light
+char *lightIdentifier = "la";	// (L)ights, not garage door opener light
 
 // sonar sensor
 const uint8_t sonarPin = A0;
@@ -56,7 +63,7 @@ int sonarReading = 0;
 int lastSonarReading = 0;
 char *sonarId = "sa";		// accomodating multiple sonar sensors
 
-// temp sensor
+// temp sensor (outside)
 #define DHTPIN 2
 DHT dht(DHTPIN, DHT22);
 char *tmpIdC = "tc";	// temp in C
@@ -64,6 +71,11 @@ char *tmpIdF = "tf";	// temp in F
 char *tmpIdH = "th";	// humidity
 char *tmpIdHiC = "ta";	// heat index in C
 char *tmpIdHiF = "tb";	// heat index in F
+
+// I2C temp sensor (inside)
+const int tmpAddress = 0x48;
+char *tmpIntIdC = "ti";	// internal temp in C
+float tmpIntReadingC = 0;
 
 // garage door switch from house
 const uint8_t garageDoorPin = 3;
@@ -103,10 +115,15 @@ uint8_t inboundSerialRead[SERIAL_BUFFER];
 bool isConnected = false;
 
 // used to discover node, host will have to search the ports for the node
-bool isDiscovered = false;
+//bool isDiscovered = false;
+// enabled by default for debugging
+bool isDiscovered = true;
+
 
 // wait for host signal to start/pause
-bool startSession = false;
+//bool startSession = false;
+// enabled by default for debugging
+bool startSession = true;
 
 void setup()
 {
@@ -127,6 +144,7 @@ void setup()
 	digitalWrite(activityLED, LOW);
 
 	Serial.begin(9600);
+	Wire.begin();
 
 	// TODO: need this? Flash until the USB serial cable is connected
 	while (!Serial)
@@ -169,7 +187,7 @@ void loop()
 			lowerSwitchReading = digitalRead(lowerSwitchPin);
 			sendData(lGarageId, lowerSwitchReading);
 
-			// read house garage door
+			// read kitchen garage door		TODO: change references to KitchenDoor 
 			garageDoorReading = digitalRead(garageDoorPin);
 			sendData(doorId, garageDoorReading);
 
@@ -178,17 +196,18 @@ void loop()
 			sendData(lightIdentifier, lightReading);
 
 			// read sonar data
-			delay(50);	// allow ADC level to settle	TODO: read 10 times and take average to remove noise
+			delay(50);	// TODO: read 10 times and take average to remove noise, read first, wait then read remainder allow ADC level to settle
 			sonarReading = analogRead(sonarPin);
 			sendData(sonarId, sonarReading);
 
-			// temp 
+			// temp readings
 			takeTempReading();
+			// outside sensor
 			sendTempData(tmpIdC, tempData->tempC);
 			sendTempData(tmpIdH, tempData->humidity);
 			sendTempData(tmpIdHiC, tempData->heatindexC);
-
-			// read door entrance
+			// inside sensor
+			sendTempData(tmpIntIdC, tmpIntReadingC);
 
 			lastMills = millis();
 			flashLed(activityLED);
@@ -253,6 +272,15 @@ void takeTempReading()
 	// calculate the heat index
 	tempData->heatindexC = dht.computeHeatIndex(tempData->tempC, tempData->humidity, false);
 	tempData->heatIndexF = dht.computeHeatIndex(tempData->tempF, tempData->humidity);
+
+	// internal temp reading
+	Wire.requestFrom(tmpAddress, 2);
+
+	byte MSB = Wire.read();
+	byte LSB = Wire.read();
+
+	int tempSum = (MSB << 8 | LSB) >> 4;
+	tmpIntReadingC = tempSum*0.0625;
 }
 
 void nodeDiscovery()
