@@ -6,10 +6,14 @@ controller contains the business logic
 
 - The circuit
 
-IR Sensor
+IR Sensor (no longer used)
 A0	No resistor needed. Analog output that varies from 3.1V at 4cm to 0.3V at 30cm with a supply voltage between 4.5 and 5.5VDC
 http://bildr.org/2011/03/various-proximity-sensors-arduino/
 https://www.sparkfun.com/products/12728
+
+Sonar Sensors for car ports analog breadout board connects directly to analog pin
+A0 = Sonar Sensor - car port A
+A1 = Sonar Sensor - car port B
 
 Light Sensor
 A2 to Sensor to Gnd
@@ -25,8 +29,6 @@ A5	SCL
 A4	SDA
 3.3V Power
 Ground
-
-A0 = Sonar Sensor, breadout board connects directly
 
 TODO: re-evaluate these LED needs
 D6 Disovered LED
@@ -51,19 +53,24 @@ Gnd -> .01uF -> Dn
 const uint8_t discoveredLED = 13;
 const uint8_t activityLED = 4;
 
+// sonar sensor - car port A
+const uint8_t sonarPinA = A0;
+int sonarReadingA = 0;
+char *sonarIdA = "sa";
+
+/*
+// sonar sensor - car port B
+const uint8_t sonarPinB = A1;
+int sonarReadingB = 0;
+char *sonarIdB = "sb";
+*/
+
 // light sensor
-const uint8_t lightPin = A1;
+const uint8_t lightPin = A2;
 int lightReading = 0;
-int lightLastReading = 0;
 char *lightIdentifier = "la";	// (L)ights, not garage door opener light
 
-// sonar sensor
-const uint8_t sonarPin = A0;
-int sonarReading = 0;
-int lastSonarReading = 0;
-char *sonarId = "sa";		// accomodating multiple sonar sensors
-
-// temp sensor (outside)
+// temp sensor DHT22 (outside)
 #define DHTPIN 2
 DHT dht(DHTPIN, DHT22);
 char *tmpIdC = "tc";	// temp in C
@@ -72,15 +79,15 @@ char *tmpIdH = "th";	// humidity
 char *tmpIdHiC = "ta";	// heat index in C
 char *tmpIdHiF = "tb";	// heat index in F
 
-// I2C temp sensor (inside)
+// I2C temp sensor (inside) - Note: breakout board is 3.3v
 const int tmpAddress = 0x48;
 char *tmpIntIdC = "ti";	// internal temp in C
 float tmpIntReadingC = 0;
 
-// garage door switch from house
-const uint8_t garageDoorPin = 3;
-uint8_t garageDoorReading = 0;
-char *doorId = "de";
+// kitchen door switch from house
+const uint8_t kitchenDoorPin = 3;
+uint8_t kitchenDoorReading = 0;
+char *kitchenDoorId = "kd";
 
 // car (G)arage door reed switchs
 // two sensors GarageLower and GarageUpper
@@ -92,6 +99,7 @@ char *uGarageId = "gu";
 uint8_t lowerSwitchReading = 0;
 uint8_t upperSwitchReading = 0;
 
+// struct for DHT22
 struct TempReadings
 {
 	float tempF;
@@ -131,14 +139,11 @@ void setup()
 	pinMode(activityLED, OUTPUT);
 
 	// house garage door
-	pinMode(garageDoorPin, INPUT);
+	pinMode(kitchenDoorPin, INPUT);
 
 	// car garage door
 	pinMode(lowerSwitchPin, INPUT);
 	pinMode(upperSwitchPin, INPUT);
-
-	//pinMode(sonarPin, INPUT);
-	//pinMode(lightPin, INPUT);
 
 	digitalWrite(discoveredLED, LOW);
 	digitalWrite(activityLED, LOW);
@@ -187,21 +192,42 @@ void loop()
 			lowerSwitchReading = digitalRead(lowerSwitchPin);
 			sendData(lGarageId, lowerSwitchReading);
 
-			// read kitchen garage door		TODO: change references to KitchenDoor 
-			garageDoorReading = digitalRead(garageDoorPin);
-			sendData(doorId, garageDoorReading);
+			// read kitchen (to/from garage) door
+			kitchenDoorReading = digitalRead(kitchenDoorPin);
+			sendData(kitchenDoorId, kitchenDoorReading);
 
 			// read light data	TODO: read 10 times and take average to reduce noise?
 			lightReading = analogRead(lightPin);
 			sendData(lightIdentifier, lightReading);
 
-			// read sonar data
-			delay(50);	// TODO: read 10 times and take average to remove noise, read first, wait then read remainder allow ADC level to settle
-			sonarReading = analogRead(sonarPin);
-			sendData(sonarId, sonarReading);
+			// read sonar data, ignore first reading to allow ADC level to settle
+			analogRead(sonarPinA);
+			delay(50);
+			for (uint8_t i = 0; i < 8; i++)
+			{
+				sonarReadingA += analogRead(sonarPinA);
+				delay(50);
+			}
+			sonarReadingA /= 8;
+			sendData(sonarIdA, sonarReadingA);
+			sonarReadingA = 0;
+
+			/*
+			analogRead(sonarPinB);
+			delay(50);
+			for (uint8_t i = 0; i < 8; i++)
+			{
+				sonarReadingB += analogRead(sonarPinB);
+				delay(50);
+			}
+			sonarReadingB /= 8;
+			sendData(sonarIdB, sonarReadingB);
+			sonarReadingB = 0;
+			*/
 
 			// temp readings
 			takeTempReading();
+
 			// outside sensor
 			sendTempData(tmpIdC, tempData->tempC);
 			sendTempData(tmpIdH, tempData->humidity);
@@ -224,6 +250,7 @@ void sendData(char *identifier, int value)
 	Serial.println(value);
 }
 
+// data type is a float used to send tempature data
 void sendTempData(char *identifier, float value)
 {
 	Serial.print(identifier);
