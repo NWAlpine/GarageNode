@@ -58,12 +58,10 @@ const uint8_t sonarPinA = A0;
 int sonarReadingA = 0;
 char *sonarIdA = "sa";
 
-/*
 // sonar sensor - car port B
 const uint8_t sonarPinB = A1;
 int sonarReadingB = 0;
 char *sonarIdB = "sb";
-*/
 
 // light sensor
 const uint8_t lightPin = A2;
@@ -212,7 +210,18 @@ void loop()
 			sendData(sonarIdA, sonarReadingA);
 			sonarReadingA = 0;
 
+			// temp readings
+			takeTempReading();
+
+			// outside sensor
+			sendTempData(tmpIdC, tempData->tempC);
+			sendTempData(tmpIdH, tempData->humidity);
+			sendTempData(tmpIdHiC, tempData->heatindexC);
+			// inside sensor
+			sendTempData(tmpIntIdC, tmpIntReadingC);
+
 			/*
+			// read sonar data, ignore first reading to allow ADC level to settle
 			analogRead(sonarPinB);
 			delay(50);
 			for (uint8_t i = 0; i < 8; i++)
@@ -224,16 +233,6 @@ void loop()
 			sendData(sonarIdB, sonarReadingB);
 			sonarReadingB = 0;
 			*/
-
-			// temp readings
-			takeTempReading();
-
-			// outside sensor
-			sendTempData(tmpIdC, tempData->tempC);
-			sendTempData(tmpIdH, tempData->humidity);
-			sendTempData(tmpIdHiC, tempData->heatindexC);
-			// inside sensor
-			sendTempData(tmpIntIdC, tmpIntReadingC);
 
 			lastMills = millis();
 			flashLed(activityLED);
@@ -292,6 +291,7 @@ void readData()
 
 void takeTempReading()
 {
+	// external temp reading (DHT22)
 	tempData->humidity = dht.readHumidity();
 	tempData->tempC = dht.readTemperature();
 	tempData->tempF = dht.readTemperature(true);
@@ -300,7 +300,8 @@ void takeTempReading()
 	tempData->heatindexC = dht.computeHeatIndex(tempData->tempC, tempData->humidity, false);
 	tempData->heatIndexF = dht.computeHeatIndex(tempData->tempF, tempData->humidity);
 
-	// internal temp reading
+
+	// internal temp reading (sparkfun breakout board)
 	Wire.requestFrom(tmpAddress, 2);
 
 	byte MSB = Wire.read();
