@@ -15,7 +15,7 @@ Sonar Sensors for car ports analog breadout board connects directly to analog pi
 A0 = Sonar Sensor - car port A
 A1 = Sonar Sensor - car port B
 
-Light Sensors
+Light Sensors (A1 and A2)
 A2 to Sensor to Gnd
 A2 to 10K to 5V
 
@@ -108,7 +108,8 @@ uint8_t lastUpperSwitchReading = -1;
 uint8_t lastKitchenDoorReading = -1;
 int lastLightReading = 0;
 int lastGarageDoorLightReading = 0;
-
+int lastSonarReadingA = 0;
+int lastSonarReadingB = 0;
 struct LastTempReadings
 {
 	float lastTempF;
@@ -144,7 +145,7 @@ int tempTimer = 5000;
 long lastLightMills = 0;
 int lightTimer = 1000;
 
-// poll all door timer
+// poll all door timer (unsure if this needs a polling threshold)
 long lastDoorMills = 0;
 int doorTimer = 100;
 
@@ -167,6 +168,7 @@ bool startSession = true;
 
 void setup()
 {
+	// LED
 	pinMode(discoveredLED, OUTPUT);
 	pinMode(activityLED, OUTPUT);
 
@@ -189,7 +191,7 @@ void setup()
 		flashLed(isDiscovered);
 	}
 
-	// now connected to PC
+	// now connected to Remote
 	isConnected = true;
 }
 
@@ -230,6 +232,7 @@ void loop()
 
 				lastUpperSwitchReading = upperSwitchReading;
 				lastLowerSwitchReading = lowerSwitchReading;
+				flashLed(activityLED);
 			}
 
 			/*
@@ -260,10 +263,10 @@ void loop()
 			{
 				lastKitchenDoorReading = kitchenDoorReading;
 				sendData(kitchenDoorId, kitchenDoorReading);
+				flashLed(activityLED);
 			}
 
 			lastDoorMills = millis();
-			flashLed(activityLED);
 		}
 
 		// poll for temp
@@ -277,18 +280,21 @@ void loop()
 			{
 				lastTempData->lastTempC = tempData->tempC;
 				sendTempData(tmpIdC, tempData->tempC);
+				flashLed(activityLED);
 			}
 
 			if (didFloatValueChange(lastTempData->lastHumidity, tempData->humidity))
 			{
 				lastTempData->lastHumidity = tempData->humidity;
 				sendTempData(tmpIdH, tempData->humidity);
+				flashLed(activityLED);
 			}
 
 			if (didFloatValueChange(lastTempData->lastHeatIndexC, tempData->heatindexC))
 			{
 				lastTempData->lastHeatIndexC = tempData->heatindexC;
 				sendTempData(tmpIdHiC, tempData->heatindexC);
+				flashLed(activityLED);
 			}
 
 			// inside sensor
@@ -296,10 +302,10 @@ void loop()
 			{
 				lastTmpIntReadingC = tmpIntReadingC;
 				sendTempData(tmpIntIdC, tmpIntReadingC);
+				flashLed(activityLED);
 			}
 
 			lastTempMills = millis();
-			flashLed(activityLED);
 		}
 
 		// poll for lights
@@ -311,6 +317,7 @@ void loop()
 			{
 				lastLightReading = lightReading;
 				sendData(lightIdentifier, lightReading);
+				flashLed(activityLED);
 			}
 
 			// garage door opener lights
@@ -319,10 +326,10 @@ void loop()
 			{
 				lastGarageDoorLightReading = garageDoorLightReading;
 				sendData(garageDoorLightIdentifier, garageDoorLightReading);
+				flashLed(activityLED);
 			}
 
 			lastLightMills = millis();
-			flashLed(activityLED);
 		}
 
 		// poll garage bays
@@ -337,25 +344,34 @@ void loop()
 				delay(50);
 			}
 			sonarReadingA /= 4;
-			sendData(sonarIdA, sonarReadingA);
-			sonarReadingA = 0;
+
+			if (didValueChange(lastSonarReadingA, sonarReadingA))
+			{
+				sendData(sonarIdA, sonarReadingA);
+				sonarReadingA = 0;
+				flashLed(activityLED);
+			}
 
 			/*
 			// read sonar data, ignore first reading to allow ADC level to settle
 			analogRead(sonarPinB);
 			delay(50);
-			for (uint8_t i = 0; i < 8; i++)
+			for (uint8_t i = 0; i < 4; i++)
 			{
 				sonarReadingB += analogRead(sonarPinB);
 				delay(50);
 			}
-			sonarReadingB /= 8;
-			sendData(sonarIdB, sonarReadingB);
-			sonarReadingB = 0;
+			sonarReadingB /= 4;
+
+			if (didValueChange(lastSonarReadingB, sonarReadingB))
+			{
+				sendData(sonarIdB, sonarReadingB);
+				sonarReadingB = 0;
+				flashLed(activityLED);
+			}
 			*/
 
 			lastBayMills = millis();
-			flashLed(activityLED);
 		}
 
 		// check for new requests from controller
@@ -443,7 +459,6 @@ void takeTempReading()
 	// calculate the heat index
 	tempData->heatindexC = dht.computeHeatIndex(tempData->tempC, tempData->humidity, false);
 	tempData->heatIndexF = dht.computeHeatIndex(tempData->tempF, tempData->humidity);
-
 
 	// internal temp reading (sparkfun breakout board)
 	Wire.requestFrom(tmpAddress, 2);
