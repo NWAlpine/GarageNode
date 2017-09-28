@@ -15,7 +15,7 @@ Sonar Sensors for car ports analog breadout board connects directly to analog pi
 A0 = Sonar Sensor - car port A
 A1 = Sonar Sensor - car port B
 
-Light Sensor
+Light Sensors
 A2 to Sensor to Gnd
 A2 to 10K to 5V
 
@@ -31,8 +31,8 @@ A4	SDA
 Ground
 
 TODO: re-evaluate these LED needs
-D6 Disovered LED
-D7 Send LED
+D2 Disovered LED
+D4 Send LED
 Dn -> 10K -> Led -> Gnd
 
 D3 = garage door
@@ -49,8 +49,8 @@ Gnd -> .01uF -> Dn
 #include "DHT.h"
 #include "wire.h"
 
-// LED			TODO: add LED and correct pin
-const uint8_t discoveredLED = 13;
+// LED
+const uint8_t discoveredLED = 7;	// connected and sending between controller and node
 const uint8_t activityLED = 4;
 
 // sonar sensor - car port A
@@ -63,10 +63,14 @@ const uint8_t sonarPinB = A1;
 int sonarReadingB = 0;
 char *sonarIdB = "sb";
 
-// light sensor
+// light sensors
 const uint8_t lightPin = A2;
 int lightReading = 0;
 char *lightIdentifier = "la";	// (L)ights, not garage door opener light
+
+const uint8_t garageDoorLightPin = A1;
+int garageDoorLightReading = 0;
+char *garageDoorLightIdentifier = "lb";
 
 // temp sensor DHT22 (outside)
 #define DHTPIN 2
@@ -81,6 +85,8 @@ char *tmpIdHiF = "tb";	// heat index in F
 const int tmpAddress = 0x48;
 char *tmpIntIdC = "ti";	// internal temp in C
 float tmpIntReadingC = 0;
+
+float lastTmpIntReadingC = 0;
 
 // kitchen door switch from house
 const uint8_t kitchenDoorPin = 3;
@@ -97,6 +103,23 @@ char *uGarageId = "gu";
 uint8_t lowerSwitchReading = 0;
 uint8_t upperSwitchReading = 0;
 
+uint8_t lastLowerSwitchReading = -1;
+uint8_t lastUpperSwitchReading = -1;
+uint8_t lastKitchenDoorReading = -1;
+int lastLightReading = 0;
+int lastGarageDoorLightReading = 0;
+
+struct LastTempReadings
+{
+	float lastTempF;
+	float lastTempC;
+	float lastHumidity;
+	float lastHeatIndexF;
+	float lastHeatIndexC;
+};
+
+LastTempReadings *lastTempData = new LastTempReadings();
+
 // struct for DHT22
 struct TempReadings
 {
@@ -109,12 +132,24 @@ struct TempReadings
 
 TempReadings *tempData = new TempReadings();
 
-// timer
-long lastMills = 0;
-int timerThreshold = 2000;
+// poll garaage bay timer
+long lastBayMills = 0;
+int bayTimer = 3000;
+
+// poll temp data
+long lastTempMills = 0;
+int tempTimer = 5000;
+
+// poll light sensor every second
+long lastLightMills = 0;
+int lightTimer = 1000;
+
+// poll all door timer
+long lastDoorMills = 0;
+int doorTimer = 100;
 
 // serial data
-#define SERIAL_BUFFER 3
+#define SERIAL_BUFFER 2
 uint8_t inboundSerialRead[SERIAL_BUFFER];
 
 // is the USB Serial cable connected
@@ -124,7 +159,6 @@ bool isConnected = false;
 //bool isDiscovered = false;
 // enabled by default for debugging
 bool isDiscovered = true;
-
 
 // wait for host signal to start/pause
 //bool startSession = false;
@@ -177,48 +211,134 @@ void loop()
 		}
 	}
 
+	// up and running, enable discoveredLED
+	digitalWrite(discoveredLED, HIGH);
+
 	// reciver to filter noise logic
 	while (startSession)
 	{
-		// TODO: space these apart
-		if (millis() - lastMills > timerThreshold)
+		// poll doors
+		if (millis() - lastDoorMills > doorTimer)
 		{
+			upperSwitchReading = digitalRead(upperSwitchPin);
+			lowerSwitchReading = digitalRead(lowerSwitchPin);
+			
+			if (didValueChange(lastUpperSwitchReading, upperSwitchReading) || didValueChange(lastLowerSwitchReading, lowerSwitchReading))
+			{
+				sendData(uGarageId, upperSwitchReading);
+				sendData(lGarageId, lowerSwitchReading);
+
+				lastUpperSwitchReading = upperSwitchReading;
+				lastLowerSwitchReading = lowerSwitchReading;
+			}
+
+			/*
 			// read garage car door positions
 			upperSwitchReading = digitalRead(upperSwitchPin);
 			sendData(uGarageId, upperSwitchReading);
 
+			if (didValueChange(lastUpperSwitchReading, upperSwitchReading))
+			{
+				lastUpperSwitchReading = upperSwitchReading;
+				sendData(uGarageId, upperSwitchReading);
+			}
+
+
 			lowerSwitchReading = digitalRead(lowerSwitchPin);
 			sendData(lGarageId, lowerSwitchReading);
 
+			if (didValueChange(lastLowerSwitchReading, lowerSwitchReading))
+			{
+				lastLowerSwitchReading = lowerSwitchReading;
+				sendData(lGarageId, lowerSwitchReading);
+			}
+			*/
+
 			// read kitchen (to/from garage) door
 			kitchenDoorReading = digitalRead(kitchenDoorPin);
-			sendData(kitchenDoorId, kitchenDoorReading);
-
-			// read light data	TODO: read 10 times and take average to reduce noise?
-			lightReading = analogRead(lightPin);
-			sendData(lightIdentifier, lightReading);
-
-			// read sonar data, ignore first reading to allow ADC level to settle
-			analogRead(sonarPinA);
-			delay(50);
-			for (uint8_t i = 0; i < 8; i++)
+			if (didValueChange(lastKitchenDoorReading, kitchenDoorReading))
 			{
-				sonarReadingA += analogRead(sonarPinA);
-				delay(50);
+				lastKitchenDoorReading = kitchenDoorReading;
+				sendData(kitchenDoorId, kitchenDoorReading);
 			}
-			sonarReadingA /= 8;
-			sendData(sonarIdA, sonarReadingA);
-			sonarReadingA = 0;
 
+			lastDoorMills = millis();
+			flashLed(activityLED);
+		}
+
+		// poll for temp
+		if (millis() - lastTempMills > tempTimer)
+		{
 			// temp readings
 			takeTempReading();
 
 			// outside sensor
-			sendTempData(tmpIdC, tempData->tempC);
-			sendTempData(tmpIdH, tempData->humidity);
-			sendTempData(tmpIdHiC, tempData->heatindexC);
+			if (didFloatValueChange(lastTempData->lastTempC, tempData->tempC))
+			{
+				lastTempData->lastTempC = tempData->tempC;
+				sendTempData(tmpIdC, tempData->tempC);
+			}
+
+			if (didFloatValueChange(lastTempData->lastHumidity, tempData->humidity))
+			{
+				lastTempData->lastHumidity = tempData->humidity;
+				sendTempData(tmpIdH, tempData->humidity);
+			}
+
+			if (didFloatValueChange(lastTempData->lastHeatIndexC, tempData->heatindexC))
+			{
+				lastTempData->lastHeatIndexC = tempData->heatindexC;
+				sendTempData(tmpIdHiC, tempData->heatindexC);
+			}
+
 			// inside sensor
-			sendTempData(tmpIntIdC, tmpIntReadingC);
+			if (didFloatValueChange(lastTmpIntReadingC, tmpIntReadingC))
+			{
+				lastTmpIntReadingC = tmpIntReadingC;
+				sendTempData(tmpIntIdC, tmpIntReadingC);
+			}
+
+			lastTempMills = millis();
+			flashLed(activityLED);
+		}
+
+		// poll for lights
+		if (millis() - lastLightMills > lightTimer)
+		{
+			// main garage lights
+			lightReading = analogRead(lightPin);
+			if (didValueChange(lastLightReading, lightReading))
+			{
+				lastLightReading = lightReading;
+				sendData(lightIdentifier, lightReading);
+			}
+
+			// garage door opener lights
+			garageDoorLightReading = analogRead(garageDoorLightPin);
+			if (didValueChange(lastGarageDoorLightReading, garageDoorLightReading))
+			{
+				lastGarageDoorLightReading = garageDoorLightReading;
+				sendData(garageDoorLightIdentifier, garageDoorLightReading);
+			}
+
+			lastLightMills = millis();
+			flashLed(activityLED);
+		}
+
+		// poll garage bays
+		if (millis() - lastBayMills > bayTimer)
+		{
+			// read sonar data, ignore first reading to allow ADC level to settle
+			analogRead(sonarPinA);
+			delay(50);
+			for (uint8_t i = 0; i < 4; i++)
+			{
+				sonarReadingA += analogRead(sonarPinA);
+				delay(50);
+			}
+			sonarReadingA /= 4;
+			sendData(sonarIdA, sonarReadingA);
+			sonarReadingA = 0;
 
 			/*
 			// read sonar data, ignore first reading to allow ADC level to settle
@@ -234,12 +354,12 @@ void loop()
 			sonarReadingB = 0;
 			*/
 
-			lastMills = millis();
+			lastBayMills = millis();
 			flashLed(activityLED);
-
-			// check for new requests from controller
-			readData();
 		}
+
+		// check for new requests from controller
+		readData();
 	}
 }
 
@@ -247,6 +367,30 @@ void sendData(char *identifier, int value)
 {
 	Serial.print(identifier);
 	Serial.println(value);
+}
+
+bool didValueChange(int lastValue, int currentValue)
+{
+	if (lastValue != currentValue)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
+bool didFloatValueChange(float lastValue, float currentValue)
+{
+	if (lastValue != currentValue)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 }
 
 // data type is a float used to send tempature data
@@ -327,7 +471,7 @@ void nodeDiscovery()
 			if (inboundSerialRead[0] == 'z')
 			{
 				// notify host the node is available
-				Serial.println("ack");
+				//Serial.println("ack");
 				isDiscovered = true;
 			}
 		}
@@ -341,6 +485,6 @@ void nodeDiscovery()
 void flashLed(uint8_t led)
 {
 	digitalWrite(led, HIGH);
-	delay(100);
+	delay(50);
 	digitalWrite(led, LOW);
 }
