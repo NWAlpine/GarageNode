@@ -1,8 +1,7 @@
 /*
 - Garage node
 
-read each sensor, prepend with an identifyer and send
-controller contains the business logic
+read each sensor, determine change, prepend with an identifyer and send
 
 - The circuit
 
@@ -30,6 +29,13 @@ A4	SDA
 3.3V Power
 Ground
 
+Air Quality Sensor
+A5 SCL
+A4 SDA
+5V Power
+Ground
+WAKE to Ground
+
 TODO: re-evaluate these LED needs
 D2 Disovered LED
 D4 Send LED
@@ -48,6 +54,7 @@ Gnd -> .01uF -> Dn
 
 #include "DHT.h"
 #include "wire.h"
+#include "Adafruit_CCS811.h"
 
 // LED
 const uint8_t discoveredLED = 7;	// connected and sending between controller and node
@@ -57,20 +64,30 @@ const uint8_t activityLED = 4;
 const uint8_t sonarPinA = A0;
 int sonarReadingA = 0;
 char *sonarIdA = "sa";
+uint8_t lastSonarAState = -1;
+int lastSonarReadingA = 0;
 
 // sonar sensor - car port B
 const uint8_t sonarPinB = A1;
 int sonarReadingB = 0;
 char *sonarIdB = "sb";
+int lastSonarReadingB = 0;
 
-// light sensors
+int sonarOccupiedThreshold = 85;	// occupied 85 or smaller for both ports
+
+// garage light sensor
 const uint8_t lightPin = A2;
 int lightReading = 0;
 char *lightIdentifier = "la";	// (L)ights, not garage door opener light
+uint8_t lastLightState = -1;
 
+// garage door light sensor
 const uint8_t garageDoorLightPin = A1;
 int garageDoorLightReading = 0;
 char *garageDoorLightIdentifier = "lb";
+uint8_t lastGarageDoorLightState = -1;
+
+int lightOnThreshold = 80;		// reading 80 or less, the light is on common to all lights
 
 // temp sensor DHT22 (outside)
 #define DHTPIN 2
@@ -81,17 +98,32 @@ char *tmpIdH = "th";	// humidity
 char *tmpIdHiC = "ta";	// heat index in C
 char *tmpIdHiF = "tb";	// heat index in F
 
-// I2C temp sensor (inside) - Note: breakout board is 3.3v
+// temp sensor (inside) I2C - Note: breakout board is 3.3v
 const int tmpAddress = 0x48;
 char *tmpIntIdC = "ti";	// internal temp in C
 float tmpIntReadingC = 0;
-
 float lastTmpIntReadingC = 0;
+
+// air quality sensor (adafruit CCS811)
+Adafruit_CCS811 airQ;
+const int airQualitySensor = 0x5A;
+int airReadyTimerMin = 20;
+int lastAirReadyTimerReading = 0;
+bool airQIsReady = false;
+int lastCO2Reading = 0;
+int lastTVOCReading = 0;
+// CO2 and TVOC readings must change by to send changes
+uint8_t airCO2ChangedThreshold = 20;
+uint8_t airTVOCChangedThreshold = 2;
+char *airQCO2Id = "ac";
+char *airQTVOCId = "at";
+char *airQualityErrorId = "ae";
 
 // kitchen door switch from house
 const uint8_t kitchenDoorPin = 3;
 uint8_t kitchenDoorReading = 0;
 char *kitchenDoorId = "kd";
+uint8_t lastKitchenDoorReading = -1;
 
 // car (G)arage door reed switchs
 // two sensors GarageLower and GarageUpper
@@ -99,17 +131,11 @@ const uint8_t lowerSwitchPin = 5;
 const uint8_t upperSwitchPin = 6;
 char *lGarageId = "gl";
 char *uGarageId = "gu";
-
 uint8_t lowerSwitchReading = 0;
 uint8_t upperSwitchReading = 0;
-
 uint8_t lastLowerSwitchReading = -1;
 uint8_t lastUpperSwitchReading = -1;
-uint8_t lastKitchenDoorReading = -1;
-int lastLightReading = 0;
-int lastGarageDoorLightReading = 0;
-int lastSonarReadingA = 0;
-int lastSonarReadingB = 0;
+
 struct LastTempReadings
 {
 	float lastTempF;
@@ -149,7 +175,7 @@ int lightTimer = 1000;
 long lastDoorMills = 0;
 int doorTimer = 100;
 
-// serial data
+// serial read data buffer
 #define SERIAL_BUFFER 2
 uint8_t inboundSerialRead[SERIAL_BUFFER];
 
@@ -189,6 +215,12 @@ void setup()
 	while (!Serial)
 	{
 		flashLed(isDiscovered);
+	}
+
+	// check to see if the air quality sensor is ready
+	if (!airQ.begin())
+	{
+		sendData(airQualityErrorId, 0);
 	}
 
 	// now connected to Remote
@@ -235,28 +267,6 @@ void loop()
 				flashLed(activityLED);
 			}
 
-			/*
-			// read garage car door positions
-			upperSwitchReading = digitalRead(upperSwitchPin);
-			sendData(uGarageId, upperSwitchReading);
-
-			if (didValueChange(lastUpperSwitchReading, upperSwitchReading))
-			{
-				lastUpperSwitchReading = upperSwitchReading;
-				sendData(uGarageId, upperSwitchReading);
-			}
-
-
-			lowerSwitchReading = digitalRead(lowerSwitchPin);
-			sendData(lGarageId, lowerSwitchReading);
-
-			if (didValueChange(lastLowerSwitchReading, lowerSwitchReading))
-			{
-				lastLowerSwitchReading = lowerSwitchReading;
-				sendData(lGarageId, lowerSwitchReading);
-			}
-			*/
-
 			// read kitchen (to/from garage) door
 			kitchenDoorReading = digitalRead(kitchenDoorPin);
 			if (didValueChange(lastKitchenDoorReading, kitchenDoorReading))
@@ -269,7 +279,7 @@ void loop()
 			lastDoorMills = millis();
 		}
 
-		// poll for temp
+		// poll for temp and airQ
 		if (millis() - lastTempMills > tempTimer)
 		{
 			// temp readings
@@ -306,6 +316,32 @@ void loop()
 			}
 
 			lastTempMills = millis();
+
+			// poll air sensor
+			bool dataAvailable = airQ.available();
+			if (dataAvailable)
+			{
+				bool dataError = airQ.readData();
+				if (!dataError)
+				{
+					int eCO2 = airQ.geteCO2();
+					int TVOC = airQ.getTVOC();
+
+					if (didValueChange(lastCO2Reading, eCO2, 10))
+					{
+						sendData(airQCO2Id, eCO2);
+						lastCO2Reading = eCO2;
+						flashLed(activityLED);
+					}
+
+					if (didValueChange(lastTVOCReading, TVOC, 2))
+					{
+						sendData(airQTVOCId, TVOC);
+						lastTVOCReading = TVOC;
+						flashLed(activityLED);
+					}
+				}
+			}
 		}
 
 		// poll for lights
@@ -313,20 +349,49 @@ void loop()
 		{
 			// main garage lights
 			lightReading = analogRead(lightPin);
-			if (didValueChange(lastLightReading, lightReading))
+
+			// did the state change
+			if (lightReading > lightOnThreshold)
 			{
-				lastLightReading = lightReading;
-				sendData(lightIdentifier, lightReading);
-				flashLed(activityLED);
+				// light is on, was light on before
+				if (lastLightState != 0)
+				{
+					// state changed, light is now off
+					lastLightState = 0;
+					sendData(lightIdentifier, lightReading);
+					flashLed(activityLED);
+				}
+			}
+			else if (lightReading < lightOnThreshold)
+			{
+				if (lastLightState != 1)
+				{
+					lastLightState = 1;
+					sendData(lightIdentifier, lightReading);
+					flashLed(activityLED);
+				}
 			}
 
 			// garage door opener lights
 			garageDoorLightReading = analogRead(garageDoorLightPin);
-			if (didValueChange(lastGarageDoorLightReading, garageDoorLightReading))
+			if (garageDoorLightReading > lightOnThreshold)
 			{
-				lastGarageDoorLightReading = garageDoorLightReading;
-				sendData(garageDoorLightIdentifier, garageDoorLightReading);
-				flashLed(activityLED);
+				if (lastGarageDoorLightState != 0)
+				{
+					// state changed, light is now ff
+					lastGarageDoorLightState = 0;
+					sendData(garageDoorLightIdentifier, garageDoorLightReading);
+					flashLed(activityLED);
+				}
+			}
+			else if (garageDoorLightReading < lightOnThreshold)
+			{
+				if (lastGarageDoorLightState != 1)
+				{
+					lastGarageDoorLightState = 1;
+					sendData(garageDoorLightIdentifier, garageDoorLightReading);
+					flashLed(activityLED);
+				}
 			}
 
 			lastLightMills = millis();
@@ -345,12 +410,35 @@ void loop()
 			}
 			sonarReadingA /= 4;
 
+			if (sonarReadingA > sonarOccupiedThreshold)
+			{
+				// bay is occupied, was it previously occupied
+				if (lastSonarAState != 0)
+				{
+					lastSonarAState = 0;
+					sendData(sonarIdA, sonarReadingA);
+					flashLed(activityLED);
+				}
+			}
+			else if (sonarReadingA < sonarOccupiedThreshold)
+			{
+				if (lastSonarAState != 1)
+				{
+					lastSonarAState = 1;
+					sendData(sonarIdA, sonarReadingA);
+					flashLed(activityLED);
+				}
+			}
+
+			/*
+			// working default
 			if (didValueChange(lastSonarReadingA, sonarReadingA))
 			{
 				sendData(sonarIdA, sonarReadingA);
 				sonarReadingA = 0;
 				flashLed(activityLED);
 			}
+			*/
 
 			/*
 			// read sonar data, ignore first reading to allow ADC level to settle
@@ -383,6 +471,19 @@ void sendData(char *identifier, int value)
 {
 	Serial.print(identifier);
 	Serial.println(value);
+}
+
+// check if values changed by a trehshold amount
+bool didValueChange(int lastValue, int currentValue, int threshold)
+{
+	if (currentValue > lastValue + threshold || currentValue < lastValue - threshold)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 }
 
 bool didValueChange(int lastValue, int currentValue)

@@ -24,9 +24,15 @@
     <ClInclude Include="..\libraries\DHT.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\libraries\Adafruit_CCS811.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\libraries\DHT.cpp">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libraries\Adafruit_CCS811.cpp">
       <Filter>Header Files</Filter>
     </ClCompile>
   </ItemGroup>
