@@ -113,8 +113,8 @@ bool airQIsReady = false;
 int lastCO2Reading = 0;
 int lastTVOCReading = 0;
 // CO2 and TVOC readings must change by to send changes
-uint8_t airCO2ChangedThreshold = 20;
-uint8_t airTVOCChangedThreshold = 2;
+uint8_t airCO2ChangedThreshold = 50;
+uint8_t airTVOCChangedThreshold = 5;
 char *airQCO2Id = "ac";
 char *airQTVOCId = "at";
 char *airQualityErrorId = "ae";
@@ -327,14 +327,14 @@ void loop()
 					int eCO2 = airQ.geteCO2();
 					int TVOC = airQ.getTVOC();
 
-					if (didValueChange(lastCO2Reading, eCO2, 10))
+					if (didValueChange(lastCO2Reading, eCO2, airCO2ChangedThreshold))
 					{
 						sendData(airQCO2Id, eCO2);
 						lastCO2Reading = eCO2;
 						flashLed(activityLED);
 					}
 
-					if (didValueChange(lastTVOCReading, TVOC, 2))
+					if (didValueChange(lastTVOCReading, TVOC, airTVOCChangedThreshold))
 					{
 						sendData(airQTVOCId, TVOC);
 						lastTVOCReading = TVOC;
