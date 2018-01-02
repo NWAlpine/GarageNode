@@ -14,9 +14,9 @@ Sonar Sensors for car ports analog breadout board connects directly to analog pi
 A0 = Sonar Sensor - car port A
 A1 = Sonar Sensor - car port B
 
-Light Sensors (A1 and A2)
-A2 to Sensor to Gnd
-A2 to 10K to 5V
+Light Sensors: A2 = Garage Lights, A3 Garage Door Opener Lights
+A2/3 to Sensor to Gnd
+A2/3 to 10K to 5V
 
 Temp Sensor
 DHT22 (also RHT03)
@@ -38,7 +38,7 @@ WAKE to Ground
 
 TODO: re-evaluate these LED needs
 D2 Disovered LED
-D4 Send LED
+D7 Send LED
 Dn -> 10K -> Led -> Gnd
 
 D3 = garage door
@@ -81,8 +81,8 @@ int lightReading = 0;
 char *lightIdentifier = "la";	// (L)ights, not garage door opener light
 uint8_t lastLightState = -1;
 
-// garage door light sensor
-const uint8_t garageDoorLightPin = A1;
+// garage door opener light sensor
+const uint8_t garageDoorLightPin = A3;
 int garageDoorLightReading = 0;
 char *garageDoorLightIdentifier = "lb";
 uint8_t lastGarageDoorLightState = -1;
@@ -534,13 +534,13 @@ void readData()
 	case 's':
 		Serial.println("Starting.");
 		startSession = true;
-		digitalWrite(activityLED, HIGH);
+		digitalWrite(discoveredLED, HIGH);
 		break;
 
 	case 'p':
 		Serial.println("Paused.");
 		startSession = false;
-		digitalWrite(activityLED, LOW);
+		digitalWrite(discoveredLED, LOW);
 		break;
 
 	default:
