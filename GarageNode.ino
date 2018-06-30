@@ -552,6 +552,8 @@ void readData()
 
 void takeTempReading()
 {
+	//Sample the temp sensors n times and take the average to reduce the noise
+
 	// external temp reading (DHT22)
 	tempData->humidity = dht.readHumidity();
 	tempData->tempC = dht.readTemperature();
